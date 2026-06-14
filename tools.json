@@ -189,7 +189,7 @@
     },
     {
       "name": "import_contacts_to_project",
-      "description": "Import spreadsheet-shaped contact rows into a KOSMU project's dynamic Contacts-style table. The tool finds the project by name, creates the table if requested, ensures default contact columns, imports rows with dedupe, writes a summary note, and logs project activity.",
+      "description": "Import spreadsheet-shaped contact rows into a KOSMU project's dynamic Contacts-style table. The tool finds the project by name, creates the table if requested, ensures the minimal outreach contact columns by default, imports rows with dedupe, writes a summary note, and logs project activity.",
       "when_to_use": "Use this when Hermes has contacts from a spreadsheet, CSV, Google Sheet, research output, or copied table and needs them stored inside a specific KOSMU project. Do not ask for KOSMU login credentials or use browser automation for this.",
       "input_schema": {
         "type": "object",
@@ -217,6 +217,12 @@
           "create_table_if_missing": {
             "type": "boolean",
             "default": true
+          },
+          "column_preset": {
+            "type": "string",
+            "enum": ["minimal", "standard", "custom", "none"],
+            "default": "minimal",
+            "description": "Column preset for a newly created or initialized table. Use minimal for ordinary outreach spreadsheets; only use standard when the user explicitly asks for full CRM-style tracking."
           },
           "dedupe_by": {
             "type": "array",

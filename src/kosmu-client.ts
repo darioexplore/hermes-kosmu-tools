@@ -336,6 +336,7 @@ interface AgentTablesOutput {
 
 interface AgentCreateTableOutput {
   table: { id: string; project_id: string; name: string; created_at: string; updated_at: string };
+  columns?: unknown[];
 }
 
 interface AgentImportRowsOutput {
@@ -395,7 +396,12 @@ export async function import_contacts_to_project(
     const createResult = await kosmuFetch<AgentCreateTableOutput>({
       method: "POST",
       path: `/api/agent/projects/${project.id}/tables`,
-      body: { name: tableName, type: "contacts", created_by: "hermes_agent" },
+      body: {
+        name: tableName,
+        type: "contacts",
+        created_by: "hermes_agent",
+        column_preset: input.column_preset ?? "minimal",
+      },
     });
     if (!createResult.ok) return createResult;
     table = createResult.data.table;
@@ -404,7 +410,7 @@ export async function import_contacts_to_project(
   const columnsResult = await kosmuFetch<{ count: number }>({
     method: "POST",
     path: `/api/agent/tables/${table.id}/columns`,
-    body: {},
+    body: { column_preset: input.column_preset ?? "minimal" },
   });
   if (!columnsResult.ok) return columnsResult;
 

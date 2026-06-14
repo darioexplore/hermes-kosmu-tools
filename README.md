@@ -247,9 +247,13 @@ environment. Hermes is not using the scoped project-member token.
 
 - **Purpose.** Import spreadsheet-shaped contact rows into a dynamic KOSMU table
   inside a named project.
-- **Input.** `{ project_name, table_name, contacts, create_table_if_missing?, dedupe_by?, create_summary_note? }`.
+- **Input.** `{ project_name, table_name, contacts, create_table_if_missing?, column_preset?, dedupe_by?, create_summary_note? }`.
   `contacts` is an array of row objects copied from a spreadsheet, CSV, Google
   Sheet, or research output.
+- **Columns.** Defaults to `column_preset: "minimal"` for simple outreach:
+  Company / Hotel / Brand, Person name, Role, Email, Status, Country, and
+  Region / City. Use `standard` only when the user explicitly asks for the full
+  CRM-style contact table.
 - **Header normalization.** Common columns are mapped automatically:
   `Hotel`/`Brand`/`Company` -> `company_name`, `Email Address` -> `email`,
   `Website URL` -> `website`, `IG` -> `instagram`, `Contact Person` ->

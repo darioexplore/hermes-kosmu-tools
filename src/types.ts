@@ -223,6 +223,7 @@ export interface ImportContactsToProjectInput {
   table_name: string;
   contacts: Record<string, unknown>[];
   create_table_if_missing?: boolean;
+  column_preset?: "minimal" | "standard" | "custom" | "none";
   dedupe_by?: string[];
   create_summary_note?: boolean;
 }
