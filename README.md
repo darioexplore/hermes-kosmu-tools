@@ -21,9 +21,9 @@ project, the token can see and edit that project. If Hermes is removed, the same
 token loses access. Hermes does not need Dario's login or password.
 
 Never ask for a KOSMU password. Never use Playwright to log in as Dario for
-normal outreach work. Contacts are written through `kosmu_create_contacts`,
-which calls KOSMU's token-scoped API and stores rows in the Project's native
-`Contacts` table.
+normal outreach work. Spreadsheet contacts are written through
+`import_contacts_to_project`, which calls KOSMU's token-scoped API and stores
+rows in the Project's dynamic table system.
 
 ## One-command connection check
 
@@ -69,10 +69,10 @@ durable memory across runs.
 
 ```
 integrations/hermes/
-  tools.json          9 model-facing tool definitions (JSON Schema)
+  tools.json          10 model-facing tool definitions (JSON Schema)
   src/
     types.ts          shared types + the OUTREACH_STATUSES enum + ToolResult
-    kosmu-client.ts    8 KOSMU tools (typed fetch + error mapping)
+    kosmu-client.ts    9 KOSMU tools (typed fetch + error mapping)
     doctor.ts          connection check CLI
     call-tool.ts       generic tool invocation CLI
     gmail.ts           gmail_create_draft (drafts.create only, no send path)
@@ -243,7 +243,27 @@ environment. Hermes is not using the scoped project-member token.
   what the campaign is about. Pass the returned id to contacts and to the Email
   Writer.
 
-### 6. `kosmu_update_contact_outreach(projectId, contactId, outreachData)`
+### 6. `import_contacts_to_project(project_name, table_name, contacts[])`
+
+- **Purpose.** Import spreadsheet-shaped contact rows into a dynamic KOSMU table
+  inside a named project.
+- **Input.** `{ project_name, table_name, contacts, create_table_if_missing?, dedupe_by?, create_summary_note? }`.
+  `contacts` is an array of row objects copied from a spreadsheet, CSV, Google
+  Sheet, or research output.
+- **Header normalization.** Common columns are mapped automatically:
+  `Hotel`/`Brand`/`Company` -> `company_name`, `Email Address` -> `email`,
+  `Website URL` -> `website`, `IG` -> `instagram`, `Contact Person` ->
+  `contact_name`, `Position` -> `role`, `Notes` -> `personalization_notes`.
+- **Output.** `{ project, table, inserted, updated, skipped, failed, failures, summary, note_created }`.
+- **Dedup + idempotency.** KOSMU dedupes by email, website, and company name.
+  Emails are lowercased, URLs are normalized, generic emails like `info@` and
+  `hello@` are marked `Generic`, and rows with no email are marked
+  `Unverified`.
+- **When to use.** This is the default tool for Hermes spreadsheet/contact
+  imports. Do not request the user's KOSMU credentials and do not use browser
+  automation to populate Studio tables.
+
+### 7. `kosmu_update_contact_outreach(projectId, contactId, outreachData)`
 
 - **Purpose.** Record outreach status and Gmail metadata on a contact **after**
   a draft exists in Gmail. This is the contact's durable memory across runs.
@@ -267,7 +287,7 @@ environment. Hermes is not using the scoped project-member token.
   `outreach_status: "draft_created"`), then to advance the lifecycle as the
   operator reports progress.
 
-### 7. `kosmu_log_activity(projectId, activity)`
+### 8. `kosmu_log_activity(projectId, activity)`
 
 - **Purpose.** Append to the shared, auditable agent activity trail.
 - **Input.** `{ projectId: uuid, activity: { agent_name (required), action (required), summary?, metadata? } }`.
@@ -279,7 +299,7 @@ environment. Hermes is not using the scoped project-member token.
   see (research finished, brief captured, drafts created). Keep `action` a short
   machine-ish verb and `summary` a one-line human sentence.
 
-### 8. `kosmu_delete_project_table(projectId, tableId)`
+### 9. `kosmu_delete_project_table(projectId, tableId)`
 
 - **Purpose.** Soft-delete one native KOSMU project table. This mirrors the
   human Delete table action: it sets `deleted_at`, it does not hard-delete rows
@@ -296,7 +316,7 @@ environment. Hermes is not using the scoped project-member token.
 - **When to use.** After inspecting `databases` and identifying accidental
   retry leftovers.
 
-### 9. `gmail_create_draft(to, subject, body, threadId?)`
+### 10. `gmail_create_draft(to, subject, body, threadId?)`
 
 - **Purpose.** Create a **draft** email in the connected Gmail account.
 - **Input.** `{ to (email), subject, body (plain text), threadId? }`.

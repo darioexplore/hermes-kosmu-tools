@@ -218,6 +218,27 @@ export interface LogActivityInput {
   metadata?: Record<string, unknown> | null;
 }
 
+export interface ImportContactsToProjectInput {
+  project_name: string;
+  table_name: string;
+  contacts: Record<string, unknown>[];
+  create_table_if_missing?: boolean;
+  dedupe_by?: string[];
+  create_summary_note?: boolean;
+}
+
+export interface ImportContactsToProjectOutput {
+  project: AgentProjectSummary;
+  table: { id: string; name: string };
+  inserted: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  failures: { index: number; error: string }[];
+  summary: string;
+  note?: { id: string; title: string; created_at: string } | null;
+}
+
 // ── Tool output shapes ──────────────────────────────────────────────
 
 export interface SearchProjectsOutput {

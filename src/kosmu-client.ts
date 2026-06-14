@@ -20,6 +20,8 @@ import {
   type CreateCampaignBriefOutput,
   type CreateContactInput,
   type DeleteProjectTableOutput,
+  type ImportContactsToProjectInput,
+  type ImportContactsToProjectOutput,
   type LogActivityInput,
   type LogActivityOutput,
   type OutreachStatus,
@@ -313,7 +315,155 @@ export function kosmu_log_activity(
   });
 }
 
-// ── Tool 8: delete one project table ────────────────────────────────
+// ── Tool 8: import spreadsheet contacts to a project table ──────────
+
+interface AgentProjectByNameOutput {
+  project: {
+    id: string;
+    title: string;
+    description: string | null;
+    project_type: "finite" | "ongoing" | null;
+    status: string | null;
+    created_at: string;
+    updated_at: string;
+  };
+}
+
+interface AgentTablesOutput {
+  count: number;
+  tables: { id: string; project_id: string; name: string; created_at: string; updated_at: string }[];
+}
+
+interface AgentCreateTableOutput {
+  table: { id: string; project_id: string; name: string; created_at: string; updated_at: string };
+}
+
+interface AgentImportRowsOutput {
+  table_id: string;
+  table_name: string;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  failures: { index: number; error: string }[];
+  summary: string;
+}
+
+interface AgentCreateNoteOutput {
+  note: { id: string; title: string; created_at: string };
+}
+
+export async function import_contacts_to_project(
+  input: ImportContactsToProjectInput
+): Promise<ToolResult<ImportContactsToProjectOutput>> {
+  const projectName = input.project_name?.trim();
+  const tableName = input.table_name?.trim();
+  if (!projectName) return Promise.resolve(localInvalid("project_name is required."));
+  if (!tableName) return Promise.resolve(localInvalid("table_name is required."));
+  if (!Array.isArray(input.contacts) || input.contacts.length === 0) {
+    return Promise.resolve(localInvalid("contacts must be a non-empty array."));
+  }
+  if (input.contacts.length > 1000) {
+    return Promise.resolve(localInvalid("contacts may contain at most 1000 rows per call."));
+  }
+
+  const projectResult = await kosmuFetch<AgentProjectByNameOutput>({
+    method: "GET",
+    path: "/api/agent/projects/by-name",
+    query: { name: projectName },
+  });
+  if (!projectResult.ok) return projectResult;
+
+  const project = projectResult.data.project;
+  const tablesResult = await kosmuFetch<AgentTablesOutput>({
+    method: "GET",
+    path: `/api/agent/projects/${project.id}/tables`,
+  });
+  if (!tablesResult.ok) return tablesResult;
+
+  let table = tablesResult.data.tables.find(
+    (candidate) => candidate.name.trim().toLowerCase() === tableName.toLowerCase()
+  );
+  if (!table) {
+    if (input.create_table_if_missing === false) {
+      return fail(404, {
+        code: "not_found",
+        message: `Table "${tableName}" was not found in project "${project.title}".`,
+        retryable: false,
+      });
+    }
+    const createResult = await kosmuFetch<AgentCreateTableOutput>({
+      method: "POST",
+      path: `/api/agent/projects/${project.id}/tables`,
+      body: { name: tableName, type: "contacts", created_by: "hermes_agent" },
+    });
+    if (!createResult.ok) return createResult;
+    table = createResult.data.table;
+  }
+
+  const columnsResult = await kosmuFetch<{ count: number }>({
+    method: "POST",
+    path: `/api/agent/tables/${table.id}/columns`,
+    body: {},
+  });
+  if (!columnsResult.ok) return columnsResult;
+
+  const importResult = await kosmuFetch<AgentImportRowsOutput>({
+    method: "POST",
+    path: `/api/agent/tables/${table.id}/import-rows`,
+    body: {
+      rows: input.contacts,
+      dedupe_by: input.dedupe_by ?? ["email", "website", "company_name"],
+      duplicate_strategy: "skip",
+    },
+  });
+  if (!importResult.ok) return importResult;
+
+  let note: ImportContactsToProjectOutput["note"] = null;
+  if (input.create_summary_note !== false) {
+    const noteResult = await kosmuFetch<AgentCreateNoteOutput>({
+      method: "POST",
+      path: `/api/agent/projects/${project.id}/notes`,
+      body: {
+        title: `Contact import: ${table.name}`,
+        content: importResult.data.summary,
+      },
+    });
+    if (noteResult.ok) note = noteResult.data.note;
+  }
+
+  await kosmu_log_activity(project.id, {
+    agent_name: "hermes_agent",
+    action: "contacts_spreadsheet_imported",
+    summary: importResult.data.summary,
+    metadata: {
+      table_id: table.id,
+      table_name: table.name,
+      inserted: importResult.data.inserted,
+      updated: importResult.data.updated,
+      skipped: importResult.data.skipped,
+      failed: importResult.data.failed,
+    },
+  });
+
+  return {
+    ok: true,
+    status: importResult.status,
+    data: {
+      project,
+      table: { id: table.id, name: table.name },
+      inserted: importResult.data.inserted,
+      updated: importResult.data.updated,
+      skipped: importResult.data.skipped,
+      failed: importResult.data.failed,
+      failures: importResult.data.failures,
+      summary: importResult.data.summary,
+      note,
+    },
+  };
+}
+
+// ── Tool 9: delete one project table ────────────────────────────────
 
 export function kosmu_delete_project_table(
   projectId: string,

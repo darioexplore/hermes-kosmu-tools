@@ -22,6 +22,7 @@ import {
   kosmu_delete_project_table,
   kosmu_get_contacts,
   kosmu_get_project_context,
+  import_contacts_to_project,
   kosmu_log_activity,
   kosmu_search_projects,
   kosmu_update_contact_outreach,
@@ -35,6 +36,7 @@ export {
   kosmu_get_project_context,
   kosmu_get_contacts,
   kosmu_create_contacts,
+  import_contacts_to_project,
   kosmu_create_campaign_brief,
   kosmu_update_contact_outreach,
   kosmu_log_activity,
@@ -112,6 +114,7 @@ export const kosmuHermesTools: HermesTool[] = [
   tool("kosmu_log_activity", (a) =>
     kosmu_log_activity(a.projectId as string, (a.activity as never) ?? {})
   ),
+  tool("import_contacts_to_project", (a) => import_contacts_to_project(a as never)),
   tool("kosmu_delete_project_table", (a) =>
     kosmu_delete_project_table(a.projectId as string, a.tableId as string)
   ),
