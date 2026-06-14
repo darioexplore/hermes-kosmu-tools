@@ -1,0 +1,221 @@
+{
+  "$comment": "Hermes tool definitions for the KOSMU Admin API + Gmail drafts. JSON Schema is model-facing; executors live in src/. Keep in sync with src/kosmu-client.ts and the KOSMU routes under src/app/api/admin/projects/.",
+  "tools": [
+    {
+      "name": "kosmu_search_projects",
+      "description": "Search KOSMU workspaces (projects) by title and return lightweight summaries. KOSMU is the workspace and memory; this is how an agent finds the project to work in before reading or writing anything else.",
+      "when_to_use": "First step when the operator names a project on Telegram ('work on the Apollo outreach') or when you need a projectId for any other kosmu_* tool. Call with an empty query to list the most recently updated projects.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Case-insensitive title substring. Omit or pass empty for the most recent projects."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "kosmu_get_project_context",
+      "description": "Fetch a project's basics plus its notes, databases (Studio tables), contacts and recent agent activity. Read this to ground yourself in what already exists before acting.",
+      "when_to_use": "After resolving a projectId, before generating a plan, briefs or emails, so you reuse existing notes/decisions instead of duplicating them. Use the `databases` array to identify native tables by id, including retry-created tables that need cleanup.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string", "format": "uuid", "description": "KOSMU project id." }
+        },
+        "required": ["projectId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "kosmu_get_contacts",
+      "description": "List the contacts (companies/people for outreach) in a project, optionally filtered. Returns the full contact rows including outreach_status and stored Gmail ids.",
+      "when_to_use": "To see who is already in the project, to pick the next batch to email (filter outreach_status='ready_to_pitch'), or to find follow-ups (outreach_status='follow_up_needed'). Always read before creating, to avoid duplicates.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string", "format": "uuid" },
+          "filters": {
+            "type": "object",
+            "description": "Optional exact-match filters.",
+            "properties": {
+              "category": { "type": "string" },
+              "status": { "type": "string" },
+              "outreach_status": {
+                "type": "string",
+                "enum": ["new", "needs_email", "ready_to_pitch", "draft_created", "sent", "replied", "interested", "not_interested", "follow_up_needed", "closed"]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": ["projectId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "kosmu_create_contacts",
+      "description": "Bulk-create contacts in a project. KOSMU deduplicates against existing rows and within the batch by email, then website, then company_name, so re-running with overlap is safe. Returns created rows plus a per-row skipped/errors report.",
+      "when_to_use": "After a research agent has gathered prospects. Send them all in one call (up to 500). Read the response: `created` are new, `skipped` were duplicates, `errors` failed validation. company_name is the only required field per contact.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string", "format": "uuid" },
+          "contacts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "properties": {
+                "company_name": { "type": "string", "minLength": 1, "maxLength": 300 },
+                "contact_name": { "type": "string" },
+                "role": { "type": "string" },
+                "email": { "type": "string", "description": "Validated as an email if present; empty string is treated as null." },
+                "website": { "type": "string" },
+                "instagram": { "type": "string" },
+                "linkedin": { "type": "string" },
+                "category": { "type": "string" },
+                "source_url": { "type": "string" },
+                "source_notes": { "type": "string" },
+                "relevance_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "notes": { "type": "string" },
+                "status": { "type": "string" },
+                "created_by": { "type": "string", "maxLength": 120, "description": "Per-contact attribution. Defaults to 'hermes_agent' server-side; set it to the specific agent (e.g. 'research_agent')." },
+                "outreach_status": {
+                  "type": "string",
+                  "description": "Client-side guardrail. NOTE: the bulk-create endpoint stores this as free text (max 50 chars) and does NOT reject non-lifecycle values; only kosmu_update_contact_outreach enforces the enum server-side.",
+                  "enum": ["new", "needs_email", "ready_to_pitch", "draft_created", "sent", "replied", "interested", "not_interested", "follow_up_needed", "closed"]
+                },
+                "campaign_brief_id": { "type": "string", "format": "uuid" },
+                "follow_up_date": { "type": "string", "description": "ISO 8601 datetime." }
+              },
+              "required": ["company_name"],
+              "additionalProperties": false
+            }
+          },
+          "agent_name": { "type": "string", "description": "Attribution for the activity log. Defaults to 'hermes_agent'." }
+        },
+        "required": ["projectId", "contacts"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "kosmu_create_campaign_brief",
+      "description": "Store the human's pitch/goal for an outreach campaign as a campaign brief. The Email Writer agent reads briefs to draft emails; contacts link to a brief via campaign_brief_id. NOT idempotent: each call creates a new brief, so check existing briefs first and reuse the returned id.",
+      "when_to_use": "When the operator answers, on Telegram, what the campaign is about (the offer, the ask, who to target, the tone). Save it once per campaign, then pass the returned brief id to contacts and to the Email Writer.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string", "format": "uuid" },
+          "brief": {
+            "type": "object",
+            "properties": {
+              "pitch_goal": { "type": "string", "minLength": 1, "maxLength": 10000, "description": "Required. What this campaign is trying to achieve." },
+              "title": { "type": "string", "maxLength": 300 },
+              "offer": { "type": "string", "description": "What we offer the contact." },
+              "ask": { "type": "string", "description": "The specific ask / call to action." },
+              "target_categories": { "type": "array", "items": { "type": "string" }, "description": "Contact categories this brief targets." },
+              "tone": { "type": "string", "description": "Voice for the emails, e.g. 'warm, concise'." },
+              "extra_context": { "type": "string" }
+            },
+            "required": ["pitch_goal"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["projectId", "brief"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "kosmu_update_contact_outreach",
+      "description": "Record outreach status and Gmail metadata on a contact AFTER a draft is created in Gmail. KOSMU is the source of truth for outreach state; Gmail holds the draft. Provide at least one field. A supplied campaign_brief_id must belong to the same project.",
+      "when_to_use": "Right after gmail_create_draft: store the returned draft/thread/message ids and set outreach_status='draft_created'. Later, advance the lifecycle (sent, replied, interested, follow_up_needed, closed) as the operator reports progress on Telegram. This is the contact's memory across runs.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string", "format": "uuid" },
+          "contactId": { "type": "string", "format": "uuid" },
+          "outreachData": {
+            "type": "object",
+            "minProperties": 1,
+            "properties": {
+              "outreach_status": {
+                "type": "string",
+                "enum": ["new", "needs_email", "ready_to_pitch", "draft_created", "sent", "replied", "interested", "not_interested", "follow_up_needed", "closed"]
+              },
+              "campaign_brief_id": { "type": "string", "format": "uuid" },
+              "gmail_draft_id": { "type": "string", "maxLength": 300 },
+              "gmail_thread_id": { "type": "string", "maxLength": 300 },
+              "gmail_message_id": { "type": "string", "maxLength": 300 },
+              "last_contacted_at": { "type": "string", "description": "ISO 8601 datetime." },
+              "follow_up_date": { "type": "string", "description": "ISO 8601 datetime." },
+              "reply_status": { "type": "string", "maxLength": 100 },
+              "notes": { "type": "string", "maxLength": 20000 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": ["projectId", "contactId", "outreachData"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "kosmu_log_activity",
+      "description": "Append one entry to a project's agent activity log. This is the shared, auditable trail of what the Hermes agents did, visible in KOSMU and surfaced by kosmu_get_project_context.",
+      "when_to_use": "After a meaningful step that the other agents or the operator should see: a research sweep finished, a campaign brief captured, a batch of drafts created. Keep `action` a short machine-ish verb and `summary` a one-line human sentence.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string", "format": "uuid" },
+          "activity": {
+            "type": "object",
+            "properties": {
+              "agent_name": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Which Hermes agent did this, e.g. 'research_agent'." },
+              "action": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Short verb phrase, e.g. 'contacts_imported'." },
+              "summary": { "type": "string", "maxLength": 5000 },
+              "metadata": { "type": "object", "description": "Arbitrary structured detail." }
+            },
+            "required": ["agent_name", "action"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["projectId", "activity"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "kosmu_delete_project_table",
+      "description": "Soft-delete one native KOSMU project table by id. This mirrors the human Delete table action: it sets deleted_at and does not hard-delete rows or cells.",
+      "when_to_use": "Only for explicit cleanup of retry-created or messy tables after inspecting kosmu_get_project_context.databases. Never delete intended tables such as Contacts, Sponsor Outreach, Portugal Hotels, or human-curated databases unless the operator specifically asks for that table to be removed.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string", "format": "uuid", "description": "KOSMU project id." },
+          "tableId": { "type": "string", "format": "uuid", "description": "Native project table id from kosmu_get_project_context.databases." }
+        },
+        "required": ["projectId", "tableId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "gmail_create_draft",
+      "description": "Create a DRAFT email in the connected Gmail account. This tool only creates drafts. It never sends. There is no send tool in this set; sending stays a human action. Returns the Gmail draft/message/thread ids.",
+      "when_to_use": "When the Email Writer has a finished email for a contact. Create the draft, then immediately call kosmu_update_contact_outreach to store the returned draft_id/thread_id/message_id and set outreach_status='draft_created'. The human reviews and sends from Gmail.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "string", "description": "Recipient email address." },
+          "subject": { "type": "string", "description": "Email subject." },
+          "body": { "type": "string", "description": "Plain-text email body." },
+          "threadId": { "type": "string", "description": "Optional Gmail thread id to attach a reply draft to." }
+        },
+        "required": ["to", "subject", "body"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

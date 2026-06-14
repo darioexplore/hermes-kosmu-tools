@@ -1,0 +1,234 @@
+{
+  "$comment": "Machine-readable KOSMU outreach workflow for Hermes. Prose spec: outreach-workflow.md. Tool contracts: ../tools.json. Sending is impossible by construction (no send tool); Gmail is drafts only.",
+  "name": "kosmu_outreach",
+  "version": "1.0.0",
+  "entrypoint": "parse_command",
+  "channel": "telegram",
+  "variables": {
+    "projectHint": "string",
+    "targetCount": "integer",
+    "projectId": "uuid",
+    "context": "object",
+    "existingContacts": "array",
+    "candidates": "array",
+    "enriched": "array",
+    "rows": "array",
+    "createdContactIds": "array",
+    "briefId": "uuid",
+    "emails": "array",
+    "drafts": "array"
+  },
+  "agents": [
+    { "id": "hermes", "role": "orchestrator", "prompt": "agents/00-hermes-orchestrator.md", "tools": ["kosmu_search_projects", "kosmu_get_project_context", "kosmu_get_contacts", "kosmu_create_contacts", "kosmu_create_campaign_brief", "kosmu_update_contact_outreach", "kosmu_log_activity", "gmail_create_draft"] },
+    { "id": "research_agent", "role": "find_companies", "prompt": "agents/01-research-agent.md", "tools": [] },
+    { "id": "contact_agent", "role": "find_contact_details", "prompt": "agents/02-contact-agent.md", "tools": [] },
+    { "id": "database_agent", "role": "clean_structure_score", "prompt": "agents/03-database-agent.md", "tools": [] },
+    { "id": "email_writer_agent", "role": "write_drafts", "prompt": "agents/04-email-writer-agent.md", "tools": [] },
+    { "id": "gmail_agent", "role": "create_gmail_drafts", "prompt": "agents/05-gmail-agent.md", "tools": ["gmail_create_draft"] }
+  ],
+  "rules": [
+    "never_send_email_automatically",
+    "save_contacts_as_draft_first",
+    "avoid_duplicate_contacts",
+    "no_email_use_form_or_generic_and_flag_needs_verification",
+    "always_store_source_urls",
+    "always_update_kosmu_activity",
+    "keep_telegram_messages_short"
+  ],
+  "outreach_status_enum": ["new", "needs_email", "ready_to_pitch", "draft_created", "sent", "replied", "interested", "not_interested", "follow_up_needed", "closed"],
+  "states": [
+    {
+      "id": "parse_command",
+      "owner": "hermes",
+      "do": "Extract projectHint and targetCount (N) from the Telegram message. Default N=20 if unspecified.",
+      "next": "search_projects"
+    },
+    {
+      "id": "search_projects",
+      "owner": "hermes",
+      "tool": "kosmu_search_projects",
+      "input": { "query": "{{projectHint}}" },
+      "save": { "candidates": "result.data.projects" },
+      "next": "select_project"
+    },
+    {
+      "id": "select_project",
+      "owner": "hermes",
+      "type": "decision",
+      "branches": [
+        { "when": "candidates.length === 0", "action": "telegram_reply", "message": "I couldn't find a project matching that. Which project should I use?", "to": "await_project_choice" },
+        { "when": "candidates.length === 1 || one_clear_match", "save": { "projectId": "best.id" }, "to": "load_context" },
+        { "when": "candidates.length > 1 && ambiguous", "type": "human_gate", "action": "telegram_reply", "message": "I found a few matches: {{titles}}. Which one?", "to": "await_project_choice" }
+      ]
+    },
+    {
+      "id": "await_project_choice",
+      "owner": "hermes",
+      "type": "human_gate",
+      "on_reply": { "save": { "projectId": "chosen.id" }, "to": "load_context" }
+    },
+    {
+      "id": "load_context",
+      "owner": "hermes",
+      "tool": "kosmu_get_project_context",
+      "input": { "projectId": "{{projectId}}" },
+      "save": { "context": "result.data" },
+      "note": "Read notes, databases, project_type, categories. Do NOT use context.contacts for dedup; it is always [].",
+      "next": "load_existing"
+    },
+    {
+      "id": "load_existing",
+      "owner": "hermes",
+      "tool": "kosmu_get_contacts",
+      "input": { "projectId": "{{projectId}}" },
+      "save": { "existingContacts": "result.data.contacts" },
+      "note": "This is the real dedup set (emails, websites, company names).",
+      "next": "research"
+    },
+    {
+      "id": "research",
+      "owner": "research_agent",
+      "input": { "context": "{{context}}", "targetCount": "{{targetCount}}", "buffer": 1.4 },
+      "save": { "candidates": "agent.companies" },
+      "note": "Return ~ceil(N*1.4) relevant companies so dedup/dead-ends still net N.",
+      "next": "enrich"
+    },
+    {
+      "id": "enrich",
+      "owner": "contact_agent",
+      "input": { "companies": "{{candidates}}" },
+      "save": { "enriched": "agent.contacts" },
+      "note": "Per company: email, website, instagram, linkedin, contact form, source_url. Always capture source_url.",
+      "next": "structure"
+    },
+    {
+      "id": "structure",
+      "owner": "database_agent",
+      "input": { "enriched": "{{enriched}}", "existingContacts": "{{existingContacts}}", "categories": "context.categories", "targetCount": "{{targetCount}}" },
+      "save": { "rows": "agent.rows" },
+      "note": "Dedup vs existing + in-batch; relevance_score 0-100; category; map outreach_status + [needs_verification] notes per the status table; include source_url. Trim to ~N usable.",
+      "next": "save_contacts"
+    },
+    {
+      "id": "save_contacts",
+      "owner": "hermes",
+      "tool": "kosmu_create_contacts",
+      "input": { "projectId": "{{projectId}}", "contacts": "{{rows}}", "agent_name": "database_agent" },
+      "save": { "created": "result.data.created", "createdCount": "result.data.created_count", "skipped": "result.data.skipped", "errors": "result.data.errors" },
+      "on_partial": "Keep created rows; report errors.length and skipped.length at report time. The `created` rows carry the real KOSMU contact ids and are the ONLY rows drafted this run (skipped dupes already exist).",
+      "next": "log_research"
+    },
+    {
+      "id": "log_research",
+      "owner": "hermes",
+      "tool": "kosmu_log_activity",
+      "input": {
+        "projectId": "{{projectId}}",
+        "activity": {
+          "agent_name": "research_agent",
+          "action": "contacts_researched",
+          "summary": "Researched and added {{created_count}} draft contacts ({{skipped}} dupes skipped) across categories {{categories}}.",
+          "metadata": { "created": "{{created_count}}", "skipped": "{{skipped}}", "errors": "{{errors}}", "categories": "{{categories}}" }
+        }
+      },
+      "next": "ask_pitch"
+    },
+    {
+      "id": "ask_pitch",
+      "owner": "hermes",
+      "type": "human_gate",
+      "action": "telegram_reply",
+      "message": "I added {{created_count}} draft contacts. What is the pitch about and what are your goals?",
+      "on_reply": { "save": { "pitchAnswer": "reply.text (free text)" }, "to": "save_brief" }
+    },
+    {
+      "id": "save_brief",
+      "owner": "hermes",
+      "tool": "kosmu_create_campaign_brief",
+      "note": "Hermes interprets Dario's free-text reply into these fields. pitch_goal is REQUIRED and must never be empty: if no explicit goal can be extracted, use the full answer text verbatim.",
+      "input": {
+        "projectId": "{{projectId}}",
+        "brief": {
+          "pitch_goal": "{{extracted goal, else the full answer text}}",
+          "title": "{{extracted or null}}",
+          "offer": "{{extracted or null}}",
+          "ask": "{{extracted or null}}",
+          "target_categories": "{{extracted or null}}",
+          "tone": "{{extracted or null}}",
+          "extra_context": "{{the raw answer, for fidelity}}"
+        }
+      },
+      "save": { "brief": "result.data.campaign_brief", "briefId": "result.data.campaign_brief.id" },
+      "next": "write_emails"
+    },
+    {
+      "id": "write_emails",
+      "owner": "email_writer_agent",
+      "input": { "contacts": "created where outreach_status == 'ready_to_pitch' && email present (these carry real KOSMU contact ids)", "brief": "{{brief}}", "voice": "dario_viegas" },
+      "save": { "emails": "agent.emails" },
+      "note": "Feed the SAVED `created` rows (real contact ids) and the FULL brief object, not pre-save rows or a bare brief id. One {contactId, to, subject, body} per pitchable contact, category-adapted. Skip needs_email contacts.",
+      "next": "create_drafts"
+    },
+    {
+      "id": "create_drafts",
+      "owner": "gmail_agent",
+      "type": "foreach",
+      "over": "emails",
+      "tool": "gmail_create_draft",
+      "input": { "to": "{{item.to}}", "subject": "{{item.subject}}", "body": "{{item.body}}" },
+      "save": { "drafts": "ONLY items where ok === true && draft_id non-empty -> { contactId, draft_id, thread_id, message_id }", "draftFailures": "items where ok !== true -> { contactId, reason }" },
+      "on_item_error": "Exclude that contact from `drafts` (leave it ready_to_pitch); record it in draftFailures for the final report.",
+      "next": "update_outreach"
+    },
+    {
+      "id": "update_outreach",
+      "owner": "hermes",
+      "type": "foreach",
+      "over": "drafts",
+      "guard": "item.draft_id is non-empty. NEVER set draft_created without a real gmail_draft_id.",
+      "tool": "kosmu_update_contact_outreach",
+      "note": "Do NOT send `notes` here: kosmu_update_contact_outreach OVERWRITES notes, which would erase the Database Agent's [needs_verification] flag.",
+      "input": {
+        "projectId": "{{projectId}}",
+        "contactId": "{{item.contactId}}",
+        "outreachData": {
+          "outreach_status": "draft_created",
+          "gmail_draft_id": "{{item.draft_id}}",
+          "gmail_thread_id": "{{item.thread_id}}",
+          "gmail_message_id": "{{item.message_id}}",
+          "campaign_brief_id": "{{briefId}}",
+          "last_contacted_at": "{{now}}"
+        }
+      },
+      "next": "log_drafts"
+    },
+    {
+      "id": "log_drafts",
+      "owner": "hermes",
+      "tool": "kosmu_log_activity",
+      "input": {
+        "projectId": "{{projectId}}",
+        "activity": {
+          "agent_name": "email_writer_agent",
+          "action": "drafts_created",
+          "summary": "Created {{drafts.length}} Gmail drafts for campaign {{briefId}}.",
+          "metadata": { "drafts": "{{drafts.length}}", "briefId": "{{briefId}}" }
+        }
+      },
+      "next": "report_ready"
+    },
+    {
+      "id": "report_ready",
+      "owner": "hermes",
+      "type": "end",
+      "action": "telegram_reply",
+      "message": "Drafts are ready for review in Gmail. {{drafts.length}} drafted ({{genericCount}} use a generic inbox, confirm before sending). {{needsEmailCount}} need a verified email first. Nothing is sent.",
+      "compute": {
+        "genericCount": "count of created where notes starts with '[needs_verification] generic'",
+        "needsEmailCount": "count of created where outreach_status == 'needs_email'",
+        "draftFailures": "from create_drafts (mention if any)"
+      },
+      "note": "Terminal. No send. Dario reviews and sends from Gmail. Keep to ~2 lines; drop any parenthetical whose count is 0."
+    }
+  ]
+}
