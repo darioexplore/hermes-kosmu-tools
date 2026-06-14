@@ -26,7 +26,7 @@ if (token) process.env.KOSMU_AGENT_TOKEN = token;
 
 console.log("KOSMU Hermes connector doctor");
 console.log(`Base URL: ${process.env.KOSMU_API_BASE_URL || "(missing)"}`);
-console.log(`Token: ${redact(process.env.KOSMU_AGENT_TOKEN ?? process.env.KOSMU_ADMIN_AGENT_TOKEN)}`);
+console.log(`Token: ${redact(process.env.KOSMU_AGENT_TOKEN)}`);
 
 const result = await kosmu_search_projects({ query });
 
@@ -38,6 +38,11 @@ if (!result.ok) {
 
 console.log("Connection OK.");
 console.log(`Visible projects: ${result.data.count}`);
+if (result.data.count > 5) {
+  console.warn(
+    "Warning: this token can see many projects. Confirm the VPS is using the scoped KOSMU_AGENT_TOKEN from Settings -> Integrations, not an admin/break-glass token."
+  );
+}
 for (const project of result.data.projects.slice(0, 10)) {
   console.log(`- ${project.title} (${project.id})`);
 }

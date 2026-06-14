@@ -20,6 +20,11 @@ After that, permissions are controlled in KOSMU. If Hermes is added to a
 project, the token can see and edit that project. If Hermes is removed, the same
 token loses access. Hermes does not need Dario's login or password.
 
+Never ask for a KOSMU password. Never use Playwright to log in as Dario for
+normal outreach work. Contacts are written through `kosmu_create_contacts`,
+which calls KOSMU's token-scoped API and stores rows in the Project's native
+`Contacts` table.
+
 ## One-command connection check
 
 After installing the connector on the VPS:
@@ -138,8 +143,10 @@ See `.env.example`. Summary:
 
 - `KOSMU_API_BASE_URL` — e.g. `https://kosmu.vercel.app` (no trailing slash).
 - `KOSMU_AGENT_TOKEN` — the Hermes bearer token generated in KOSMU
-  Settings -> Integrations. Prefer a browser-generated token tied to the Hermes
-  agent member, not the legacy env-var break-glass token.
+  Settings -> Integrations. This must be the browser-generated token tied to the
+  Hermes agent member. The connector intentionally does not accept
+  `KOSMU_ADMIN_AGENT_TOKEN`, because that break-glass token can expose every
+  admin-owned project.
 - Gmail OAuth: `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`,
   `GMAIL_OAUTH_REFRESH_TOKEN`, and `GMAIL_ACCOUNT_ID` (usually `me`). Minimal
   scope `https://www.googleapis.com/auth/gmail.compose`.
@@ -151,6 +158,9 @@ See `.env.example`. Summary:
 All KOSMU tools authenticate with `Authorization: Bearer <KOSMU_AGENT_TOKEN>`.
 For member-scoped tokens, KOSMU resolves the token to the Hermes agent member and
 only exposes Projects where Hermes is a collaborator.
+
+If `kosmu_search_projects` shows many unrelated projects, stop and fix the VPS
+environment. Hermes is not using the scoped project-member token.
 
 ### 1. `kosmu_search_projects(query?)`
 

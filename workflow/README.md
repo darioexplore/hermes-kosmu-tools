@@ -36,6 +36,11 @@ Nothing is ever sent by an agent.
 
 ## Two contract notes (read once)
 
+- **No browser login.** Hermes must not ask for Dario's KOSMU email/password and
+  must not use Playwright to populate Studio data. The KOSMU API already has the
+  tool for this: `kosmu_create_contacts(projectId, contacts, "database_agent")`.
+  That endpoint writes to the Project's native `Contacts` table using the
+  scoped `KOSMU_AGENT_TOKEN`.
 - **Dedup source.** Existing contacts for dedup come from `kosmu_get_contacts`,
   not from `kosmu_get_project_context` (whose `contacts` is always `[]`). The
   workflow already does this at state `load_existing`.
@@ -48,6 +53,7 @@ Nothing is ever sent by an agent.
 
 ## What needs KOSMU-side setup
 
-The same prerequisites as the tools: `KOSMU_ADMIN_AGENT_TOKEN` set in Vercel,
-and migrations applied (contacts `033` is live; campaign briefs `034` is still
-pending, needed at state `save_brief`). See `../README.md`.
+The same prerequisites as the tools: a browser-generated `KOSMU_AGENT_TOKEN`
+from KOSMU Settings -> Integrations, Hermes granted to the target Project, and
+migrations applied (campaign briefs `034` is needed at state `save_brief`). See
+`../README.md`.

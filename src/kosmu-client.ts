@@ -53,7 +53,7 @@ interface KosmuConfig {
  *  the agent gets a predictable "fix your setup" signal instead of a crash. */
 function readConfig(): KosmuConfig | ToolFail {
   const baseUrl = (process.env.KOSMU_API_BASE_URL ?? "").replace(/\/+$/, "");
-  const token = process.env.KOSMU_AGENT_TOKEN ?? process.env.KOSMU_ADMIN_AGENT_TOKEN ?? "";
+  const token = process.env.KOSMU_AGENT_TOKEN ?? "";
   if (!baseUrl) {
     return fail(0, {
       code: "not_configured",
